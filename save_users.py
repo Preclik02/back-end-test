@@ -3,7 +3,7 @@ import json
 from flask import Flask, request
 import requests
 
-app = Flask(__name__)
+gunicorn save_users:app
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
