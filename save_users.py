@@ -1,7 +1,7 @@
 import os
 import json
 import threading
-from flask import Flask, request
+from flask import Flask, request, send_file
 import requests
 from datetime import datetime
 
@@ -16,6 +16,7 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+ADMIN_KEY = os.getenv("ADMIN_KEY")
 
 FILE = "users.json"
 
@@ -42,7 +43,7 @@ def save_data(data):
 
 
 # =========================
-# WEBHOOK
+# WEBHOOK (SAFE)
 # =========================
 def send_webhook(content):
     if not WEBHOOK_URL:
@@ -58,7 +59,37 @@ def send_webhook(content):
 # =========================
 @app.route("/")
 def home():
-    return "Bot OAuth backend is running"
+    return "OAuth backend running"
+
+
+# =========================
+# ADMIN PANEL (VIEW DATA)
+# =========================
+@app.route("/admin/<key>")
+def admin_panel(key):
+    if key != ADMIN_KEY:
+        return "Unauthorized", 403
+
+    data = load_data()
+
+    return {
+        "count": len(data),
+        "users": data
+    }
+
+
+# =========================
+# DOWNLOAD DATABASE
+# =========================
+@app.route("/admin/<key>/download")
+def download_db(key):
+    if key != ADMIN_KEY:
+        return "Unauthorized", 403
+
+    if not os.path.exists(FILE):
+        return "No database file", 404
+
+    return send_file(FILE, as_attachment=True)
 
 
 # =========================
@@ -71,7 +102,7 @@ def callback():
     if not code:
         return "Missing code", 400
 
-    # prevent replay spam
+    # prevent reuse (fix rate limit spam)
     if code in used_codes:
         return "Code already used", 429
 
@@ -91,12 +122,12 @@ def callback():
     )
 
     token_data = token_res.json()
-
     access_token = token_data.get("access_token")
+
     if not access_token:
         return f"Token error: {token_data}", 400
 
-    # get user
+    # get user info
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
@@ -107,38 +138,27 @@ def callback():
     user_id = user["id"]
     username = f"{user.get('username')}#{user.get('discriminator')}"
 
-    # save token safely
+    # store user
     db = load_data()
     db[user_id] = {
         "access_token": access_token,
         "time": str(datetime.utcnow())
     }
     save_data(db)
-    def caesar(access_token, shift=3):
-        alphabet = "abcdefghijklmnopqrstuvwxyz"
-        if access_token.lower() not in alphabet:
-            return access_token
 
-        i = alphabet.index(access_token.lower())
-        encrypted = alphabet[(i + shift) % 26]
-        return encrypted
-
-    encrypted = caesar(access_token, 3)
-
-    # webhook (NO TOKEN LEAK)
+    # webhook log (NO TOKEN)
     send_webhook(
         f"New OAuth user\n"
         f"User: {username}\n"
         f"ID: {user_id}\n"
-        f"Time: {datetime.utcnow()} UTC"
-        f"thing: {encrypted}"
+        f"Total users: {len(db)}"
     )
 
     return f"User {username} authorized successfully"
 
 
 # =========================
-# ADD TO GUILD
+# ADD USER TO GUILD
 # =========================
 @app.route("/add/<user_id>")
 def add_user(user_id):
@@ -168,4 +188,3 @@ def add_user(user_id):
 # =========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
