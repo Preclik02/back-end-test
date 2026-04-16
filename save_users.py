@@ -2,17 +2,19 @@ import os
 import json
 from flask import Flask, request
 import requests
+from datetime import datetime
 
 app = Flask(__name__)
 
 # =========================
-# ENV VARIABLES (Render)
+# ENV VARIABLES
 # =========================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REDIRECT_URI = os.getenv("REDIRECT_URI")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GUILD_ID = os.getenv("GUILD_ID")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 FILE = "users.json"
 
@@ -30,6 +32,21 @@ def load_data():
 def save_data(data):
     with open(FILE, "w") as f:
         json.dump(data, f, indent=2)
+
+
+# =========================
+# WEBHOOK
+# =========================
+def send_webhook(content):
+    if not WEBHOOK_URL:
+        return
+
+    try:
+        requests.post(WEBHOOK_URL, json={
+            "content": content
+        })
+    except Exception as e:
+        print("Webhook error:", e)
 
 
 # =========================
@@ -81,19 +98,28 @@ def callback():
     ).json()
 
     user_id = user["id"]
+    username = f"{user.get('username')}#{user.get('discriminator')}"
 
-    # store token
+    # store token (lokálně pro bot funkci)
     db = load_data()
     db[user_id] = {
         "access_token": access_token
     }
     save_data(db)
 
-    return f"User {user.get('username')} authorized successfully"
+    # send webhook (SAFE DATA ONLY)
+    send_webhook(
+        f"✅ New authorization\n"
+        f"User: {username}\n"
+        f"ID: {user_id}\n"
+        f"Time: {datetime.utcnow()} UTC"
+    )
+
+    return f"User {username} authorized successfully"
 
 
 # =========================
-# ADD USER TO GUILD (LATER)
+# ADD USER TO GUILD
 # =========================
 @app.route("/add/<user_id>")
 def add_user(user_id):
@@ -114,6 +140,9 @@ def add_user(user_id):
     r = requests.put(url, headers=headers, json={
         "access_token": access_token
     })
+
+    # webhook log
+    send_webhook(f"➕ Attempted to add user {user_id} → Response: {r.status_code}")
 
     return r.text
 
