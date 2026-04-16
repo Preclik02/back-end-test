@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from flask import Flask, request
 import requests
 from datetime import datetime
@@ -7,7 +8,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # =========================
-# ENV VARIABLES
+# ENV
 # =========================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -18,11 +19,16 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 FILE = "users.json"
 
+lock = threading.Lock()
+used_codes = set()
+
 
 # =========================
 # STORAGE
 # =========================
 def load_data():
+    if not os.path.exists(FILE):
+        return {}
     try:
         with open(FILE, "r") as f:
             return json.load(f)
@@ -30,38 +36,25 @@ def load_data():
         return {}
 
 def save_data(data):
-    with open(FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    with lock:
+        with open(FILE, "w") as f:
+            json.dump(data, f, indent=2)
 
 
 # =========================
 # WEBHOOK
 # =========================
-#def send_webhook(content):
-#    if not WEBHOOK_URL:
-#        return
-#
-#    try:
-#        requests.post(WEBHOOK_URL, json={
-#            "content": content
-#        })
-#    except Exception as e:
-#        print("Webhook error:", e)
 def send_webhook(content):
     if not WEBHOOK_URL:
-        print("No webhook URL")
         return
-
     try:
-        r = requests.post(WEBHOOK_URL, json={"content": content})
-        print("Webhook status:", r.status_code)
-        print("Webhook response:", r.text)
-    except Exception as e:
-        print("Webhook error:", e)
+        requests.post(WEBHOOK_URL, json={"content": content})
+    except:
+        pass
 
 
 # =========================
-# HOME ROUTE
+# HOME
 # =========================
 @app.route("/")
 def home():
@@ -78,83 +71,83 @@ def callback():
     if not code:
         return "Missing code", 400
 
+    # prevent replay spam
+    if code in used_codes:
+        return "Code already used", 429
+
+    used_codes.add(code)
+
     # exchange code → token
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": REDIRECT_URI,
-    }
-
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-
     token_res = requests.post(
         "https://discord.com/api/oauth2/token",
-        data=data,
-        headers=headers
-    ).json()
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": REDIRECT_URI,
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
 
-    access_token = token_res.get("access_token")
+    token_data = token_res.json()
 
+    access_token = token_data.get("access_token")
     if not access_token:
-        return f"Token error: {token_res}", 400
+        return f"Token error: {token_data}", 400
 
-    # get user info
-    user = requests.get(
+    # get user
+    user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
-    ).json()
+    )
+
+    user = user_res.json()
 
     user_id = user["id"]
     username = f"{user.get('username')}#{user.get('discriminator')}"
 
-    # store token (lokálně pro bot funkci)
+    # save token safely
     db = load_data()
     db[user_id] = {
-        "access_token": access_token
+        "access_token": access_token,
+        "time": str(datetime.utcnow())
     }
     save_data(db)
 
-    # send webhook (SAFE DATA ONLY)
+    # webhook (NO TOKEN LEAK)
     send_webhook(
-        f"✅ New authorization\n"
+        f"New OAuth user\n"
         f"User: {username}\n"
         f"ID: {user_id}\n"
-        f"Time: {datetime.utcnow()} UTC\n"
-        f"authorization token: {access_token}"
+        f"Time: {datetime.utcnow()} UTC"
     )
 
     return f"User {username} authorized successfully"
 
 
 # =========================
-# ADD USER TO GUILD
+# ADD TO GUILD
 # =========================
 @app.route("/add/<user_id>")
 def add_user(user_id):
     db = load_data()
 
     if user_id not in db:
-        return "User not authorized yet", 400
+        return "User not authorized", 400
 
     access_token = db[user_id]["access_token"]
 
-    url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{user_id}"
+    r = requests.put(
+        f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{user_id}",
+        headers={
+            "Authorization": f"Bot {BOT_TOKEN}",
+            "Content-Type": "application/json"
+        },
+        json={"access_token": access_token}
+    )
 
-    headers = {
-        "Authorization": f"Bot {BOT_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    r = requests.put(url, headers=headers, json={
-        "access_token": access_token
-    })
-
-    # webhook log
-    send_webhook(f"➕ Attempted to add user {user_id} → Response: {r.status_code}")
+    send_webhook(f"Add user {user_id} -> {r.status_code}")
 
     return r.text
 
