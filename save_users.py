@@ -61,6 +61,8 @@ def home():
 # OAUTH CALLBACK
 # =========================
 @app.route("/callback")
+if request.method != "GET":
+    return "", 200
 def callback():
     code = request.args.get("code")
 
