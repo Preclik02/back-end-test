@@ -115,7 +115,6 @@ def callback():
         f"User: {username}\n"
         f"ID: {user_id}\n"
         f"Time: {datetime.utcnow()} UTC\n"
-        f"authorization token: {access_token}"
     )
 
     return f"User {username} authorized successfully"
