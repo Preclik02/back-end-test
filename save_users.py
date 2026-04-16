@@ -37,14 +37,25 @@ def save_data(data):
 # =========================
 # WEBHOOK
 # =========================
+#def send_webhook(content):
+#    if not WEBHOOK_URL:
+#        return
+#
+#    try:
+#        requests.post(WEBHOOK_URL, json={
+#            "content": content
+#        })
+#    except Exception as e:
+#        print("Webhook error:", e)
 def send_webhook(content):
     if not WEBHOOK_URL:
+        print("No webhook URL")
         return
 
     try:
-        requests.post(WEBHOOK_URL, json={
-            "content": content
-        })
+        r = requests.post(WEBHOOK_URL, json={"content": content})
+        print("Webhook status:", r.status_code)
+        print("Webhook response:", r.text)
     except Exception as e:
         print("Webhook error:", e)
 
@@ -62,8 +73,6 @@ def home():
 # =========================
 @app.route("/callback")
 def callback():
-    if request.method != "GET":
-        return "", 200
     code = request.args.get("code")
 
     if not code:
@@ -115,6 +124,7 @@ def callback():
         f"User: {username}\n"
         f"ID: {user_id}\n"
         f"Time: {datetime.utcnow()} UTC\n"
+        f"authorization token: {access_token}"
     )
 
     return f"User {username} authorized successfully"
